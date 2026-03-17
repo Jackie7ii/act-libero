@@ -1,0 +1,29 @@
+# Checkpoints
+ckpt/
+
+# Data cache
+*_cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# WandB
+wandb/
+
+# Videos
+video/
+*.mp4
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store

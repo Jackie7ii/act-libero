@@ -1,0 +1,10 @@
+torch
+torchvision
+numpy
+tqdm
+wandb
+imageio
+imageio-ffmpeg
+tensorflow
+tensorflow-datasets
+libero
