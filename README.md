@@ -111,6 +111,43 @@ wandb offline
 
 ## 数据准备
 
+### 下载数据集
+
+本项目使用托管在 HuggingFace 上的 [openvla/modified_libero_rlds](https://huggingface.co/datasets/openvla/modified_libero_rlds) 数据集，包含四个任务套件，共约 **10 GB**：
+
+| 数据集名称 | 任务套件 | 任务数 |
+|---|---|---|
+| `libero_spatial_no_noops` | LIBERO-Spatial（空间关系任务） | 10 |
+| `libero_object_no_noops` | LIBERO-Object（物体操作任务） | 10 |
+| `libero_goal_no_noops` | LIBERO-Goal（目标导向任务） | 10 |
+| `libero_10_no_noops` | LIBERO-10 / LIBERO-Long（长视域任务） | 10 |
+
+> `_no_noops` 表示已过滤掉训练数据中近零动作（no-op）的帧。
+
+**下载方式（需要 git-lfs）**：
+
+```bash
+# 安装 git-lfs（如果尚未安装）
+git lfs install
+
+# 克隆整个数据集（包含全部四个任务套件，~10 GB）
+git clone git@hf.co:datasets/openvla/modified_libero_rlds
+```
+
+下载完成后，目录结构如下：
+
+```
+modified_libero_rlds/
+├── libero_spatial_no_noops/
+├── libero_object_no_noops/
+├── libero_goal_no_noops/
+└── libero_10_no_noops/
+```
+
+将 `config.py` 中的 `data_root` 设置为该目录的路径，`task_suite_name` 设置为对应子目录名即可。
+
+---
+
 ### 数据格式
 
 本项目使用 **RLDS（TFRecord）格式** 的 LIBERO 数据集，通过 `tensorflow_datasets` 加载。
