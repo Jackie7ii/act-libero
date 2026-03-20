@@ -2,7 +2,7 @@
 
 ACT (Action Chunking with Transformers) 在 LIBERO 仿真环境上的独立实现。
 
-从 [openvla-oft](https://github.com/moojink/openvla-oft) 中提取，去除所有对原项目的依赖，可作为独立项目运行。
+还在狂暴更新中 后续会跟进mt act的部分
 
 ---
 
