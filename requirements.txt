@@ -8,3 +8,4 @@ imageio-ffmpeg
 tensorflow
 tensorflow-datasets
 libero
+sentence-transformers  # MTACT only: used by utils/gen_task_emb.py to generate task embeddings
