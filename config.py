@@ -22,8 +22,8 @@ ACT_LIBERO_CONFIG = {
     'dropout':           0.1,
 
     # training
-    'lr':           1e-5,
-    'lr_backbone':  1e-6,
+    'lr':           1e-4,
+    'lr_backbone':  5e-5,
     'weight_decay': 1e-4,
     'kl_weight':    10,
     'batch_size':   8,
@@ -33,7 +33,7 @@ ACT_LIBERO_CONFIG = {
     'temporal_agg':       False,
     'agg_k':              0.5,   # exponential decay factor for temporal aggregation weights
     'num_open_loop_steps':  8,    # number of steps to run open-loop during rollout eval (0 = fully closed-loop)
-    'eval_seed' : 42,                   # seed for eval rollout (affects env initialization and action noise)
+    'eval_seed' : 1,                   # seed for eval rollout (affects env initialization and action noise)
     'num_trials_per_task_final': 20,          # number of rollout eval trials per task at the end
     
     #eval while training
@@ -41,12 +41,12 @@ ACT_LIBERO_CONFIG = {
     'num_trials_per_task': 5,    # trials per task during in-training rollout eval
 
     # save
-    'ckpt_dir':   '/local_data/jl17265/projects/act-libero/ckpt/act_libero_spatial0',
-    'video_dir':  '/local_data/jl17265/projects/act-libero/ckpt/act_libero_spatial0',
+    'ckpt_dir':   '/local_data/jl17265/projects/act-libero/ckpt/act_libero_spatial20',
+    'video_dir':  '/local_data/jl17265/projects/act-libero/ckpt/act_libero_spatial20',
     'save_every': 50,
 
     # seed
-    'seed': 42,
+    'seed': 1,
 
     #gpu
     'gpu_id': 5,
