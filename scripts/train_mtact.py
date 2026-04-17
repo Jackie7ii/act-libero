@@ -9,9 +9,9 @@ from libero.libero import benchmark
 
 import wandb
 
-from policy import ACTPolicy
-from datasetdeal import load_data
-from config import ACT_LIBERO_CONFIG, TASK_MAX_STEPS
+from models.mtact_policy import ACTPolicy
+from data.mtact_dataset import load_data
+from configs.mtact_config import MTACT_LIBERO_CONFIG as ACT_LIBERO_CONFIG, TASK_MAX_STEPS
 from libero_utils import (
     get_libero_env,
     get_libero_dummy_action,
@@ -26,12 +26,13 @@ def make_policy(args):
     return policy
 
 def forward_pass(data, policy, device):
-    qpos_data, image_data, action_data, is_pad = data
+    qpos_data, image_data, action_data, is_pad, task_emb = data
     qpos_data   = qpos_data.to(device)
     image_data  = image_data.to(device)
     action_data = action_data.to(device)
     is_pad      = is_pad.to(device)
-    return policy(qpos_data, image_data, action_data, is_pad)
+    task_emb    = task_emb.to(device)
+    return policy(qpos_data, image_data, action_data, is_pad, task_emb)
 
 def get_obs_tensors(obs, norm_stats, camera_names, device):
     image       = get_libero_image(obs)
@@ -53,7 +54,6 @@ def get_obs_tensors(obs, norm_stats, camera_names, device):
 
 
 def rollout_eval(policy, norm_stats, args, device):
-    """训练中调用的快速 rollout eval，用 num_trials_per_task 控制每个 task 的试验次数。"""
     policy.eval()
 
     eval_seed = args.get('eval_seed', 42)
@@ -72,12 +72,14 @@ def rollout_eval(policy, norm_stats, args, device):
     temporal_agg   = args.get('temporal_agg', False)
     max_steps      = TASK_MAX_STEPS.get(suite_key, 300)
     num_queries    = args['num_queries']
+    task_emb_dict  = np.load(args['task_emb_path'], allow_pickle=True).item()
 
     total_episodes, total_successes = 0, 0
     for task_id in range(num_tasks):
         task           = task_suite.get_task(task_id)
         initial_states = task_suite.get_task_init_states(task_id)
         env, task_desc = get_libero_env(task, 'act', resolution=256)
+        task_emb = torch.from_numpy(task_emb_dict[task_desc]).float().unsqueeze(0).to(device)
 
         task_episodes, task_successes = 0, 0
         for trial_idx in range(num_trials):
@@ -102,7 +104,7 @@ def rollout_eval(policy, norm_stats, args, device):
                     qpos_tensor, image_tensor = get_obs_tensors(
                         obs, norm_stats, args['camera_names'], device)
                     with torch.inference_mode():
-                        action_chunk = policy(qpos_tensor, image_tensor)
+                        action_chunk = policy(qpos_tensor, image_tensor, task_emb=task_emb)
                     action_chunk = action_chunk.squeeze(0).cpu().numpy()
                     action_chunk = post_process(action_chunk)
                     fill_len = min(num_queries, max_steps - t_rel)
@@ -117,7 +119,7 @@ def rollout_eval(policy, norm_stats, args, device):
                         qpos_tensor, image_tensor = get_obs_tensors(
                             obs, norm_stats, args['camera_names'], device)
                         with torch.inference_mode():
-                            action_chunk = policy(qpos_tensor, image_tensor)
+                            action_chunk = policy(qpos_tensor, image_tensor, task_emb=task_emb)
                         action_chunk = action_chunk.squeeze(0).cpu().numpy()
                         action_chunk = post_process(action_chunk)
                         for i in range(min(num_open_loop, len(action_chunk))):
@@ -160,16 +162,18 @@ def train_bc(train_loader, val_loader, norm_stats, args):
 
     for epoch in tqdm(range(args['num_epochs'])):
 
-        # --train--
         policy.train()
         train_loss = 0.0
         train_l1   = 0.0
         train_kl   = 0.0
+        train_grad_norm = 0.0
         for train_data in tqdm(train_loader, desc=f'Epoch {epoch} training'):
             loss_dict = forward_pass(train_data, policy, device)
             loss      = loss_dict['loss']
             optimizer.zero_grad()
             loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=float('inf'))
+            train_grad_norm += grad_norm.item()
             optimizer.step()
             train_loss += loss.item()
             train_l1   += loss_dict['l1'].item()
@@ -178,8 +182,8 @@ def train_bc(train_loader, val_loader, norm_stats, args):
         train_loss /= len(train_loader)
         train_l1   /= len(train_loader)
         train_kl   /= len(train_loader)
+        train_grad_norm /= len(train_loader)
 
-        # --val--
         policy.eval()
         val_loss = 0.0
         with torch.inference_mode():
@@ -201,9 +205,9 @@ def train_bc(train_loader, val_loader, norm_stats, args):
             'train_kl':    train_kl,
             'lr':          optimizer.param_groups[0]['lr'],
             'lr_backbone': optimizer.param_groups[1]['lr'],
+            'train_grad_norm': train_grad_norm,
         }, step=epoch)
 
-        # --rollout eval--
         if rollout_eval_freq > 0 and (epoch + 1) % rollout_eval_freq == 0:
             print(f'\n[Epoch {epoch+1}] Running rollout eval '
                   f'({args.get("num_trials_per_task", 5)} trials/task)...')
@@ -299,12 +303,14 @@ def eval_bc(args, ckpt_name='policy_best.ckpt'):
     num_open_loop  = args.get('num_open_loop_steps', 8)
     temporal_agg   = args.get('temporal_agg', False)
     max_steps      = TASK_MAX_STEPS.get(suite_key, 300)
+    task_emb_dict  = np.load(args['task_emb_path'], allow_pickle=True).item()
 
     total_episodes, total_successes = 0, 0
     for task_id in range(num_tasks):
         task           = task_suite.get_task(task_id)
         initial_states = task_suite.get_task_init_states(task_id)
         env, task_desc = get_libero_env(task, 'act', resolution=256)
+        task_emb = torch.from_numpy(task_emb_dict[task_desc]).float().unsqueeze(0).to(device)
         print(f'\nTask {task_id}: {task_desc}')
 
         task_episodes, task_successes = 0, 0
@@ -334,7 +340,7 @@ def eval_bc(args, ckpt_name='policy_best.ckpt'):
                     qpos_tensor, image_tensor = get_obs_tensors(
                         obs, norm_stats, args['camera_names'], device)
                     with torch.inference_mode():
-                        action_chunk = policy(qpos_tensor, image_tensor)
+                        action_chunk = policy(qpos_tensor, image_tensor, task_emb=task_emb)
                     action_chunk = action_chunk.squeeze(0).cpu().numpy()
                     action_chunk = post_process(action_chunk)
                     fill_len = min(num_queries, max_steps - t_rel)
@@ -349,7 +355,7 @@ def eval_bc(args, ckpt_name='policy_best.ckpt'):
                         qpos_tensor, image_tensor = get_obs_tensors(
                             obs, norm_stats, args['camera_names'], device)
                         with torch.inference_mode():
-                            action_chunk = policy(qpos_tensor, image_tensor)
+                            action_chunk = policy(qpos_tensor, image_tensor, task_emb=task_emb)
                         action_chunk = action_chunk.squeeze(0).cpu().numpy()
                         action_chunk = post_process(action_chunk)
                         for i in range(min(num_open_loop, len(action_chunk))):
@@ -408,6 +414,7 @@ def main():
         num_queries=args['num_queries'],
         batch_size_train=args['batch_size'],
         batch_size_eval=args['batch_size'],
+        task_emb_path=args['task_emb_path'],
     )
     train_bc(train_loader, val_loader, norm_stats, args)
 

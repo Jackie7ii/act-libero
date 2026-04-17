@@ -1,12 +1,12 @@
-import torch    
-import torch.nn as nn
-from torch.nn import functional as F
-import torchvision.transforms as transforms
-
-from detr.detr_vae import build as build_ACT_model
-from detr.detr_vae import build_cnnmlp as build_CNNMLP_model
-
 import argparse
+
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
+from torch.nn import functional as F
+
+from .detr.detr_vae import build_act_model, build_cnnmlp
+
 
 def _dict_to_args(d):
     args = argparse.Namespace()
@@ -14,37 +14,40 @@ def _dict_to_args(d):
         setattr(args, k, v)
     return args
 
+
 def build_ACT_model_and_optimizer(args_override):
     args = _dict_to_args(args_override)
-    model = build_ACT_model(args)
+    model = build_act_model(args)
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
         {
-        "params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
-        "lr": args.lr_backbone,
+            "params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
+            "lr": args.lr_backbone,
         },
     ]
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
     return model, optimizer
 
+
 def build_CNNMLP_model_and_optimizer(args_override):
     args = _dict_to_args(args_override)
-    model = build_CNNMLP_model(args)
+    model = build_cnnmlp(args)
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
         {
-        "params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
-        "lr": args.lr_backbone,
+            "params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
+            "lr": args.lr_backbone,
         },
     ]
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
     return model, optimizer
+
 
 class ACTPolicy(nn.Module):
     def __init__(self, args_override):
         super().__init__()
         model, optimizer = build_ACT_model_and_optimizer(args_override)
-        self.model = model # CVAE decoder
+        self.model = model
         self.optimizer = optimizer
         self.kl_weight = args_override['kl_weight']
         print(f'KL Weight {self.kl_weight}')
@@ -54,7 +57,7 @@ class ACTPolicy(nn.Module):
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
-        if actions is not None: # training time
+        if actions is not None:
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]
 
@@ -67,8 +70,8 @@ class ACTPolicy(nn.Module):
             loss_dict['kl'] = total_kld[0]
             loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
             return loss_dict
-        else: # inference time
-            a_hat, _, (_, _) = self.model(qpos, image, env_state) # no action, sample from prior
+        else:
+            a_hat, _, (_, _) = self.model(qpos, image, env_state)
             return a_hat
 
     def configure_optimizers(self):
@@ -79,15 +82,15 @@ class CNNMLPPolicy(nn.Module):
     def __init__(self, args_override):
         super().__init__()
         model, optimizer = build_CNNMLP_model_and_optimizer(args_override)
-        self.model = model # decoder
+        self.model = model
         self.optimizer = optimizer
 
     def forward(self, qpos, image, actions=None, is_pad=None):
-        env_state = None # TODO
+        env_state = None
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
-        if actions is not None: # training time
+        if actions is not None:
             actions = actions[:, 0]
             a_hat = self.model(qpos, image, env_state, actions)
             mse = F.mse_loss(actions, a_hat)
@@ -95,12 +98,13 @@ class CNNMLPPolicy(nn.Module):
             loss_dict['mse'] = mse
             loss_dict['loss'] = loss_dict['mse']
             return loss_dict
-        else: # inference time
-            a_hat = self.model(qpos, image, env_state) # no action, sample from prior
+        else:
+            a_hat = self.model(qpos, image, env_state)
             return a_hat
 
     def configure_optimizers(self):
         return self.optimizer
+
 
 def kl_divergence(mu, logvar):
     batch_size = mu.size(0)
